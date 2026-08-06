@@ -25,6 +25,7 @@ test('a valid submission is normalised with defaults', () => {
     nonce: '',
     fee: 0,
     appVersion: null,
+    anchorTxid: null,
   });
 });
 
@@ -68,6 +69,7 @@ test('only the documented fields are accepted', () => {
     'nonce',
     'fee',
     'appVersion',
+    'anchorTxid',
   ]);
 });
 

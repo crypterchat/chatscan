@@ -1,3 +1,4 @@
+import { anchorCommitment } from '../chain/commitment.js';
 import { badRequest } from '../util/errors.js';
 import { x11Object } from './x11.js';
 
@@ -32,6 +33,7 @@ export const ALLOWED_SUBMISSION_FIELDS = Object.freeze([
   'nonce',
   'fee',
   'appVersion',
+  'anchorTxid',
 ]);
 
 /**
@@ -169,7 +171,9 @@ export function normalizeSubmission(input, limits) {
     });
   }
 
-  return { ciphertextHash, size, protocol, channelHash, nonce, fee, appVersion };
+  const anchorTxid = normalizeHash(submission.anchorTxid, 'anchorTxid', false);
+
+  return { ciphertextHash, size, protocol, channelHash, nonce, fee, appVersion, anchorTxid };
 }
 
 /**
@@ -211,11 +215,16 @@ export function createRecord({ id, submission, chainId, receivedAt, status = REC
     receivedAt,
   };
   const hash = x11Object(preimage);
+  const ref = formatRef(hash, id);
 
   return {
     id,
     hash,
-    ref: formatRef(hash, id),
+    ref,
+    // The 32 bytes published in the CDCI OP_RETURN anchor for this record.
+    // Derived from client-held fields only, so the client can publish the
+    // anchor before the explorer assigns this record its ID-number.
+    commitment: anchorCommitment({ chainId, ...submission }),
     ciphertextHash: submission.ciphertextHash,
     size: submission.size,
     protocol: submission.protocol,
@@ -230,7 +239,52 @@ export function createRecord({ id, submission, chainId, receivedAt, status = REC
     blockHeight: null,
     blockHash: null,
     indexInBlock: null,
+    // Set in cdci mode once the CDCI anchor transaction has been verified.
+    anchor: submission.anchorTxid ? { txid: submission.anchorTxid, ...UNVERIFIED_ANCHOR } : null,
   };
+}
+
+/** Anchor state before the node has been asked about the transaction. */
+const UNVERIFIED_ANCHOR = Object.freeze({
+  outputIndex: null,
+  blockHash: null,
+  blockHeight: null,
+  confirmations: 0,
+  chainlock: false,
+  finality: 'unknown',
+  verifiedAt: null,
+});
+
+/**
+ * Applies a verified anchor to a record, moving it to confirmed once the
+ * anchor transaction is in a block.
+ * @param {ReturnType<typeof createRecord>} record
+ * @param {{ txid: string, outputIndex: number | null, blockHash: string | null, blockHeight: number | null, confirmations: number, chainlock: boolean, finality: string }} anchor
+ * @param {number} [now]
+ */
+export function applyAnchor(record, anchor, now = Date.now()) {
+  record.anchor = {
+    txid: anchor.txid,
+    outputIndex: anchor.outputIndex,
+    blockHash: anchor.blockHash,
+    blockHeight: anchor.blockHeight,
+    confirmations: anchor.confirmations,
+    chainlock: anchor.chainlock,
+    finality: anchor.finality,
+    verifiedAt: now,
+  };
+
+  if (record.status === RECORD_STATUS.rejected) return record;
+
+  if (anchor.confirmations >= 1 && anchor.blockHeight !== null) {
+    record.status = RECORD_STATUS.confirmed;
+    record.confirmedAt = record.confirmedAt ?? now;
+    record.blockHeight = anchor.blockHeight;
+    record.blockHash = anchor.blockHash;
+  } else {
+    record.status = RECORD_STATUS.pending;
+  }
+  return record;
 }
 
 /**
@@ -243,6 +297,7 @@ export function publicRecord(record) {
     ref: record.ref,
     hash: record.hash,
     id: record.id,
+    commitment: record.commitment ?? null,
     ciphertextHash: record.ciphertextHash,
     size: record.size,
     protocol: record.protocol,
@@ -257,6 +312,18 @@ export function publicRecord(record) {
     blockHeight: record.blockHeight,
     blockHash: record.blockHash,
     indexInBlock: record.indexInBlock,
+    anchor: record.anchor
+      ? {
+          txid: record.anchor.txid,
+          outputIndex: record.anchor.outputIndex,
+          blockHash: record.anchor.blockHash,
+          blockHeight: record.anchor.blockHeight,
+          confirmations: record.anchor.confirmations,
+          chainlock: record.anchor.chainlock,
+          finality: record.anchor.finality,
+          verifiedAt: record.anchor.verifiedAt ? new Date(record.anchor.verifiedAt).toISOString() : null,
+        }
+      : null,
     encrypted: true,
     contentAvailable: false,
   };

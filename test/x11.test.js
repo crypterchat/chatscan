@@ -12,11 +12,12 @@ import {
   x11Object,
 } from '../src/core/x11.js';
 
-test('the chain runs eleven rounds', () => {
+test('the chain runs the eleven rounds in CDCI HashX11 order', () => {
   assert.equal(X11_ROUNDS.length, 11);
+  // Mirrors HashX11 in https://github.com/Centraldb/CDCI/blob/main/src/hash.h
   assert.deepEqual(
     X11_ROUNDS.map((round) => round.slot),
-    ['blake', 'bmw', 'groestl', 'jh', 'keccak', 'skein', 'luffa', 'cubehash', 'shavite', 'simd', 'echo'],
+    ['blake', 'bmw', 'groestl', 'skein', 'jh', 'keccak', 'luffa', 'cubehash', 'shavite', 'simd', 'echo'],
   );
 });
 

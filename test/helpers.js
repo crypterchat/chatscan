@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { ChainService } from '../src/chain/service.js';
 import { loadConfig } from '../src/config.js';
-import { ChatScanNode } from '../src/core/chain.js';
 import { createServer } from '../src/http/server.js';
 import { ChatScanStore } from '../src/store/store.js';
 
@@ -28,30 +28,32 @@ export function testConfig(overrides = {}) {
 }
 
 /**
- * A store plus node sharing one config.
+ * A store, chain service and node sharing one config.
  * @param {Record<string, string>} [overrides]
+ * @param {{ cdci?: import('../src/chain/cdci.js').CdciChain }} [injected]
  */
-export function testNode(overrides = {}) {
+export function testNode(overrides = {}, injected = {}) {
   const config = testConfig(overrides);
   const store = new ChatScanStore({ chainLogPath: config.chainLogPath, persist: config.persist }).replay();
-  const node = new ChatScanNode({ store, config });
-  node.ensureGenesis();
-  return { config, store, node };
+  const chain = new ChainService({ store, config, cdci: injected.cdci });
+  return { config, store, chain, node: chain.node };
 }
 
 /**
  * Boots the HTTP server on an ephemeral port.
  * @param {Record<string, string>} [overrides]
+ * @param {{ cdci?: import('../src/chain/cdci.js').CdciChain }} [injected]
  */
-export async function startTestServer(overrides = {}) {
-  const { config, store, node } = testNode(overrides);
-  const server = createServer({ store, node, config });
+export async function startTestServer(overrides = {}, injected = {}) {
+  const { config, store, chain, node } = testNode(overrides, injected);
+  const server = createServer({ store, chain, config });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = /** @type {import('node:net').AddressInfo} */ (server.address());
 
   return {
     config,
     store,
+    chain,
     node,
     server,
     baseUrl: `http://127.0.0.1:${port}`,
@@ -72,7 +74,7 @@ export async function startTestServer(overrides = {}) {
       });
     },
     async close() {
-      node.stop();
+      chain.stop();
       await new Promise((resolve) => server.close(resolve));
     },
   };

@@ -19,9 +19,9 @@ test('the chain log replays records and blocks after a restart', async () => {
   const store = new ChatScanStore({ chainLogPath: config.chainLogPath, persist: true }).replay();
   const node = new ChatScanNode({ store, config });
   node.ensureGenesis();
-  const confirmedRecord = node.submit(sampleSubmission()).record;
+  const confirmedRecord = (await node.submit(sampleSubmission())).record;
   node.sealBlock();
-  const pendingRecord = node.submit(sampleSubmission()).record;
+  const pendingRecord = (await node.submit(sampleSubmission())).record;
   await store.flush();
 
   assert.ok(fs.existsSync(path.join(dataDir, 'chain.jsonl')));
@@ -38,12 +38,12 @@ test('the chain log replays records and blocks after a restart', async () => {
 
 test('a node with persistence off writes nothing to disk', async () => {
   const { store, node, config } = testNode();
-  node.submit(sampleSubmission());
+  await node.submit(sampleSubmission());
   await store.flush();
   assert.equal(fs.existsSync(config.chainLogPath), false);
 });
 
-test('a corrupt chain log fails loudly instead of silently truncating', () => {
+test('a corrupt chain log fails loudly instead of silently truncating', async () => {
   const dataDir = tempDataDir();
   const chainLogPath = path.join(dataDir, 'chain.jsonl');
   fs.writeFileSync(chainLogPath, '{"t":"record"}\nnot-json\n');
@@ -51,12 +51,12 @@ test('a corrupt chain log fails loudly instead of silently truncating', () => {
   assert.throws(() => new ChatScanStore({ chainLogPath, persist: true }).replay(), /Corrupt chain log/);
 });
 
-test('records are listed newest first and can be filtered', () => {
+test('records are listed newest first and can be filtered', async () => {
   const { node, store } = testNode();
-  const first = node.submit(sampleSubmission({ protocol: 'C7' })).record;
-  const second = node.submit(sampleSubmission({ protocol: 'ETH' })).record;
+  const first = (await node.submit(sampleSubmission({ protocol: 'C7' }))).record;
+  const second = (await node.submit(sampleSubmission({ protocol: 'ETH' }))).record;
   node.sealBlock();
-  const third = node.submit(sampleSubmission({ protocol: 'C7' })).record;
+  const third = (await node.submit(sampleSubmission({ protocol: 'C7' }))).record;
 
   const all = store.listRecords({ limit: 10 });
   assert.deepEqual(
@@ -77,9 +77,9 @@ test('records are listed newest first and can be filtered', () => {
   assert.equal(store.listRecords({ limit: 1, offset: 1 }).items[0].id, second.id);
 });
 
-test('lookups work by reference, hash and ID-number', () => {
+test('lookups work by reference, hash and ID-number', async () => {
   const { node, store } = testNode();
-  const record = node.submit(sampleSubmission()).record;
+  const record = (await node.submit(sampleSubmission())).record;
 
   assert.equal(store.getRecord(record.hash, record.id).ref, record.ref);
   assert.equal(store.getRecordById(record.id).ref, record.ref);
@@ -90,11 +90,11 @@ test('lookups work by reference, hash and ID-number', () => {
   assert.equal(store.getRecord(record.hash, 999), undefined);
 });
 
-test('stats summarise the chain', () => {
+test('stats summarise the chain', async () => {
   const { node, store } = testNode();
-  const first = node.submit(sampleSubmission()).record;
+  const first = (await node.submit(sampleSubmission())).record;
   node.sealBlock();
-  const second = node.submit(sampleSubmission()).record;
+  const second = (await node.submit(sampleSubmission())).record;
 
   const stats = store.stats();
   assert.equal(stats.records, 2);

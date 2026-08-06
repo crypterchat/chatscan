@@ -6,7 +6,7 @@ import { merkleRoot } from '../src/core/merkle.js';
 import { meetsDifficulty } from '../src/core/x11.js';
 import { sampleSubmission, testNode } from './helpers.js';
 
-test('a fresh node starts at a genesis block', () => {
+test('a fresh node starts at a genesis block', async () => {
   const { store } = testNode();
   const genesis = store.getBlockByHeight(0);
 
@@ -17,18 +17,18 @@ test('a fresh node starts at a genesis block', () => {
   assert.match(genesis.hash, /^[0-9a-f]{64}$/);
 });
 
-test('genesis is created once', () => {
+test('genesis is created once', async () => {
   const { store, node } = testNode();
   node.ensureGenesis();
   node.ensureGenesis();
   assert.equal(store.blocks.length, 1);
 });
 
-test('submitted records enter the mempool as pending and get sequential IDs', () => {
+test('submitted records enter the mempool as pending and get sequential IDs', async () => {
   const { node, store } = testNode();
 
-  const first = node.submit(sampleSubmission()).record;
-  const second = node.submit(sampleSubmission()).record;
+  const first = (await node.submit(sampleSubmission())).record;
+  const second = (await node.submit(sampleSubmission())).record;
 
   assert.equal(first.id, 1);
   assert.equal(second.id, 2);
@@ -38,10 +38,10 @@ test('submitted records enter the mempool as pending and get sequential IDs', ()
   assert.equal(store.stats().pending, 2);
 });
 
-test('sealing a block confirms its records and links them back', () => {
+test('sealing a block confirms its records and links them back', async () => {
   const { node, store } = testNode();
-  const first = node.submit(sampleSubmission()).record;
-  const second = node.submit(sampleSubmission()).record;
+  const first = (await node.submit(sampleSubmission())).record;
+  const second = (await node.submit(sampleSubmission())).record;
 
   const block = node.sealBlock();
 
@@ -61,7 +61,7 @@ test('sealing a block confirms its records and links them back', () => {
   assert.equal(store.mempool().length, 0);
 });
 
-test('sealing an empty mempool does nothing unless forced', () => {
+test('sealing an empty mempool does nothing unless forced', async () => {
   const { node, store } = testNode();
   assert.equal(node.sealBlock(), null);
   assert.equal(store.blocks.length, 1);
@@ -71,12 +71,12 @@ test('sealing an empty mempool does nothing unless forced', () => {
   assert.equal(forced.txCount, 0);
 });
 
-test('a replayed ciphertext digest is recorded as rejected', () => {
+test('a replayed ciphertext digest is recorded as rejected', async () => {
   const { node, store } = testNode();
   const submission = sampleSubmission({ nonce: 'ab12' });
 
-  const first = node.submit(submission);
-  const second = node.submit(submission);
+  const first = await node.submit(submission);
+  const second = await node.submit(submission);
 
   assert.equal(first.accepted, true);
   assert.equal(second.accepted, false);
@@ -91,51 +91,51 @@ test('a replayed ciphertext digest is recorded as rejected', () => {
   assert.equal(store.getRecord(second.record.hash, second.record.id).status, 'rejected');
 });
 
-test('the same digest with a different nonce is accepted', () => {
+test('the same digest with a different nonce is accepted', async () => {
   const { node } = testNode();
   const digest = 'c'.repeat(64);
 
-  assert.equal(node.submit({ ciphertextHash: digest, size: 10, nonce: 'aa' }).accepted, true);
-  assert.equal(node.submit({ ciphertextHash: digest, size: 10, nonce: 'bb' }).accepted, true);
+  assert.equal((await node.submit({ ciphertextHash: digest, size: 10, nonce: 'aa' })).accepted, true);
+  assert.equal((await node.submit({ ciphertextHash: digest, size: 10, nonce: 'bb' })).accepted, true);
 });
 
-test('a record above its protocol ceiling is recorded as rejected', () => {
+test('a record above its protocol ceiling is recorded as rejected', async () => {
   const { node } = testNode();
-  const result = node.submit(sampleSubmission({ protocol: 'ETH', size: 256 * 1024 }));
+  const result = await node.submit(sampleSubmission({ protocol: 'ETH', size: 256 * 1024 }));
 
   assert.equal(result.accepted, false);
   assert.equal(result.record.rejectionReason, REJECTION_REASONS.protocolSize);
 });
 
-test('a client can resubmit a ciphertext that was rejected on policy', () => {
+test('a client can resubmit a ciphertext that was rejected on policy', async () => {
   const { node } = testNode();
   const submission = sampleSubmission({ protocol: 'ETH', size: 256 * 1024, nonce: 'f00d' });
 
-  const rejected = node.submit(submission);
+  const rejected = await node.submit(submission);
   assert.equal(rejected.accepted, false);
 
   // The same ciphertext under a protocol that allows the size must not be
   // mistaken for a replay of the rejected record.
-  const retried = node.submit({ ...submission, protocol: 'C7G' });
+  const retried = await node.submit({ ...submission, protocol: 'C7G' });
   assert.equal(retried.accepted, true);
   assert.equal(retried.record.status, 'pending');
 });
 
-test('a full mempool seals immediately', () => {
+test('a full mempool seals immediately', async () => {
   const { node, store } = testNode({ CHATSCAN_MAX_RECORDS_PER_BLOCK: '3' });
 
-  for (let i = 0; i < 3; i += 1) node.submit(sampleSubmission());
+  for (let i = 0; i < 3; i += 1) await node.submit(sampleSubmission());
 
   assert.equal(store.blocks.length, 2);
   assert.equal(store.tip().txCount, 3);
   assert.equal(store.stats().pending, 0);
 });
 
-test('blocks form a chain with increasing timestamps', () => {
+test('blocks form a chain with increasing timestamps', async () => {
   const { node, store } = testNode();
-  node.submit(sampleSubmission());
+  await node.submit(sampleSubmission());
   const first = node.sealBlock({ now: 1000 });
-  node.submit(sampleSubmission());
+  await node.submit(sampleSubmission());
   const second = node.sealBlock({ now: 500 });
 
   assert.equal(second.previousHash, first.hash);

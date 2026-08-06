@@ -29,30 +29,75 @@ Records one encrypted message. Requires `Content-Type: application/json`.
 | `nonce` | string | no | Up to 64 hex chars. Distinguishes repeat sends of an identical ciphertext |
 | `fee` | number | no | Non-negative fee paid for inclusion |
 | `appVersion` | string | no | Up to 32 chars of `[A-Za-z0-9._+-]` |
+| `anchorTxid` | string | on CDCI | 64 hex chars. The CDCI transaction whose `OP_RETURN` carries this record's commitment. Required when `CDCI_REQUIRE_ANCHOR=true` |
 
 Authentication: none while `CHATSCAN_INGEST_KEYS` is unset. Once set, send
 `Authorization: Bearer <key>` or `X-ChatScan-Key: <key>`.
 
-**201 Created** - the record entered the mempool:
+**201 Created** - the record was admitted:
 
 ```json
 {
   "ref": "d700bc90...27a8/42",
   "hash": "d700bc90...27a8",
   "id": 42,
-  "status": "pending",
+  "status": "confirmed",
   "rejectionReason": null,
+  "commitment": "7c1d...9e",
+  "anchor": {
+    "txid": "7b19...c4",
+    "outputIndex": 1,
+    "blockHash": "00000a...f1",
+    "blockHeight": 184203,
+    "confirmations": 2,
+    "chainlock": false,
+    "finality": "confirmed",
+    "verifiedAt": "2026-08-06T12:00:00.000Z"
+  },
   "explorerUrl": "/tx/d700bc90...27a8/42",
   "record": { "...": "see the record object below" }
 }
 ```
 
+`status` is `confirmed` when the anchor is already in a CDCI block, and `pending` while it is still in the mempool or the
+node has not been reached yet.
+
 **202 Accepted** - the submission was well formed but violated chain policy. It is still indexed, with
-`status: "rejected"` and a `rejectionReason` of `replay-detected` (this ciphertext digest and nonce were already
-recorded) or `protocol-size-exceeded`.
+`status: "rejected"` and a `rejectionReason` of:
+
+| Reason | Cause |
+| --- | --- |
+| `replay-detected` | This ciphertext digest and nonce were already recorded |
+| `protocol-size-exceeded` | `size` is over the protocol's ceiling |
+| `anchor-missing` | No `anchorTxid`, while the node requires one |
+| `anchor-not-found` | The CDCI node does not know that transaction (it needs `-txindex=1`) |
+| `anchor-mismatch` | The transaction's `OP_RETURN` commits to a different submission |
 
 Other statuses: `400` validation failure, `401` bad ingest key, `413` body over `CHATSCAN_MAX_REQUEST_BYTES`,
 `429` over `CHATSCAN_INGEST_RATE_PER_MINUTE`.
+
+## `POST /api/v1/anchor-payload`
+
+Returns the commitment for a submission that has not been sent yet, so a client can publish the anchor first. Takes the
+same fields as `POST /api/v1/records` (`anchorTxid` optional and ignored).
+
+```json
+{
+  "chainId": "cdci:main",
+  "preimage": "chatscan/1:cdci:main|3f2a...b1|1024|C7||",
+  "commitment": "7c1d...9e",
+  "marker": "CS1",
+  "opReturnPayload": "4353317c1d...9e",
+  "opReturnScript": "6a234353317c1d...9e",
+  "note": "Publish this payload in an OP_RETURN output on the CDCI chain, then submit the record with the transaction id as \"anchorTxid\"."
+}
+```
+
+The derivation is documented in [CDCI.md](CDCI.md#3-anchor-a-message); a client can compute it offline.
+
+## `GET /api/v1/records/{HASH}/{ID-number}/anchor`
+
+The same instructions for a record already indexed, plus its current `anchor` state.
 
 ## `GET /api/v1/records`
 
@@ -73,6 +118,7 @@ The record object for one reference. `400 invalid_ref` if the reference is malfo
     "ref": "d700bc90...27a8/42",
     "hash": "d700bc90...27a8",
     "id": 42,
+    "commitment": "7c1d...9e",
     "ciphertextHash": "3f2a...b1",
     "size": 1024,
     "protocol": "C7",
@@ -84,48 +130,73 @@ The record object for one reference. `400 invalid_ref` if the reference is malfo
     "rejectionReason": null,
     "receivedAt": "2026-08-06T12:00:00.000Z",
     "confirmedAt": "2026-08-06T12:00:15.000Z",
-    "blockHeight": 7,
-    "blockHash": "00a1...9f",
-    "indexInBlock": 3,
+    "blockHeight": 184203,
+    "blockHash": "00000a...f1",
+    "indexInBlock": null,
+    "anchor": {
+      "txid": "7b19...c4",
+      "outputIndex": 1,
+      "blockHash": "00000a...f1",
+      "blockHeight": 184203,
+      "confirmations": 2,
+      "chainlock": false,
+      "finality": "confirmed",
+      "verifiedAt": "2026-08-06T12:00:00.000Z"
+    },
     "encrypted": true,
     "contentAvailable": false
   }
 }
 ```
 
+`anchor.finality` is `mempool`, `confirmed`, `final`, `chainlocked` or `unknown`. `anchor` is `null` on the local
+development chain, where `indexInBlock` is used instead.
+
 ## `GET /api/v1/blocks`
 
-Newest first. Query: `limit` (1-100, default 10), `offset`.
+Newest first, from the CDCI node. Query: `limit` (1-100, default 10), `offset`. Answers `502 cdci_unavailable` when the
+node cannot be reached.
 
 ## `GET /api/v1/blocks/{height|hash}`
 
-One block plus the records it sealed.
+One block plus the message records it carries - anchored in it on CDCI, sealed into it on the local chain.
 
 ```json
 {
   "block": {
-    "height": 7,
-    "hash": "00a1...9f",
-    "previousHash": "00b2...c4",
+    "source": "cdci",
+    "height": 184203,
+    "hash": "00000a...f1",
+    "previousHash": "00000b...c4",
+    "nextHash": "00000c...02",
     "merkleRoot": "7de1...aa",
     "timestamp": "2026-08-06T12:00:15.000Z",
-    "algorithm": "x11-dev-r11",
-    "difficulty": 2,
+    "algorithm": "x11",
+    "difficulty": 1543.219,
+    "chainwork": "000000000000000000000000000000000000000000000000000000000f4240",
     "nonce": 431,
+    "bits": "1e0ffff0",
+    "version": 536870912,
     "txCount": 12,
     "sizeBytes": 24576,
-    "totalFees": 0.00504,
-    "sealedBy": "chatscan-local-sealer",
-    "recordRefs": ["d700bc90...27a8/42"]
+    "confirmations": 9,
+    "chainlock": true,
+    "totalFees": null,
+    "sealedBy": null,
+    "recordRefs": null
   },
   "records": [ { "...": "record object" } ]
 }
 ```
 
+`source` is `cdci` or `local`. `totalFees`, `sealedBy` and `recordRefs` are local-chain fields; `chainwork`, `bits`,
+`confirmations` and `chainlock` come from CDCI.
+
 ## `GET /api/v1/search?q=`
 
-Resolves a `{HASH}/{ID-number}` reference, a 64-hex record or block hash, a block height, or a record ID-number.
-`kind` is one of `record-ref`, `record-hash`, `block-hash`, `number`, `empty`, `unsupported`.
+Resolves a `{HASH}/{ID-number}` reference, a 64-hex record hash, block hash or anchor transaction id, a block height, or
+a record ID-number. `kind` is one of `record-ref`, `record-hash`, `block-hash`, `anchor-txid`, `number`, `empty`,
+`unsupported`.
 
 ```json
 {
@@ -137,12 +208,22 @@ Resolves a `{HASH}/{ID-number}` reference, a 64-hex record or block hash, a bloc
 
 ## `GET /api/v1/status`
 
-Network snapshot: height, tip hash, sealer settings, fee estimate, unconfirmed count and bytes, throughput, 24-hour
-totals, per-record averages, supported protocols, and the privacy statement. This is what the dashboard header renders.
+Network snapshot: backend, chain state, height, tip hash, fee estimate, unconfirmed count and bytes, throughput,
+24-hour totals, per-record averages, anchoring settings, supported protocols, and the privacy statement. This is what the
+dashboard header renders.
+
+`status` is `online`, `syncing` or `offline` on CDCI (`degraded` and `paused` apply to the local chain). The `chain`
+object holds the node's own figures - `chain`, `blocks`, `headers`, `bestBlockHash`, `difficulty`, `chainwork`, `peers`,
+`subversion`, `mempool`, `chainlock` - plus `reachable` and `error` when the node cannot be reached.
+
+## `GET /api/v1/chain`
+
+Just the chain state from `/api/v1/status`, without the record aggregates.
 
 ## `GET /api/v1/algorithm`
 
-The eleven X11 rounds in order, with the digest currently bound to each slot.
+The eleven X11 rounds in CDCI `HashX11` order, with the digest bound to each slot, and a note on what these hashes are
+used for. In `cdci` mode block hashes come from the node, not from here.
 
 ## `GET /api/v1/stream`
 

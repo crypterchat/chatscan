@@ -51,6 +51,45 @@ function pageHeader({ snapshot, heading, aside, breadcrumbs }) {
 }
 
 /**
+ * Detail rows for the chain card: CDCI node figures, or the local chain's.
+ * @param {any} snapshot
+ */
+function chainRows(snapshot) {
+  const chain = snapshot.chain;
+  if (chain.backend !== 'cdci') {
+    return [
+      { label: 'Chain ID', value: snapshot.chainId },
+      { label: 'Algorithm', value: snapshot.algorithm },
+      { label: 'Tip hash', value: snapshot.tipHash ? shortHash(snapshot.tipHash) : '-' },
+      { label: 'Last block', value: formatRelativeTime(Date.now() - (snapshot.tipAgeMs ?? 0)) },
+      { label: 'Seal interval', value: `${Math.round(snapshot.sealer.intervalMs / 1000)}s` },
+      { label: 'Difficulty', value: `${snapshot.sealer.difficultyNibbles} leading zero nibbles` },
+    ];
+  }
+
+  return [
+    { label: 'Chain', value: `CDCI ${chain.chain}` },
+    { label: 'Algorithm', value: 'X11 (11 rounds)' },
+    { label: 'Tip hash', value: chain.bestBlockHash ? shortHash(chain.bestBlockHash) : '-' },
+    {
+      label: 'Last block',
+      value: chain.tipTime ? formatRelativeTime(chain.tipTime) : 'unknown',
+    },
+    { label: 'Difficulty', value: chain.difficulty === null ? '-' : formatDecimal(chain.difficulty, 3) },
+    { label: 'Peers', value: chain.peers === null ? '-' : formatNumber(chain.peers) },
+    {
+      label: 'CDCI mempool',
+      value: `${formatNumber(chain.mempool.size)} tx (${formatBytes(chain.mempool.bytes)})`,
+    },
+    {
+      label: 'ChainLock',
+      value: chain.chainlock?.height ? `height ${formatNumber(chain.chainlock.height)}` : 'none',
+    },
+    { label: 'Node', value: chain.subversion ?? 'unknown' },
+  ];
+}
+
+/**
  * Right-hand header column on the home page.
  * @param {ReturnType<import('../../core/network.js').networkSnapshot>} snapshot
  */
@@ -89,6 +128,7 @@ export function homePage({ snapshot, records, blocks }) {
     degraded: 'Degraded',
     syncing: 'Syncing',
     paused: 'Paused',
+    offline: 'Node offline',
   };
 
   return html`<div class="f-section-large">
@@ -98,20 +138,22 @@ export function homePage({ snapshot, records, blocks }) {
           heading: 'For the people who value online privacy',
           aside: homeAside(snapshot),
         })}
+        ${snapshot.chain.backend === 'cdci' && !snapshot.chain.reachable
+          ? html`<div class="f-margin-bottom-32">
+              ${notice(
+                blockIcon,
+                'The CDCI node is not answering',
+                `${snapshot.chain.error} Records already indexed are still browsable; new anchors cannot be verified until the node is back.`,
+              )}
+            </div>`
+          : ''}
         <div class="w-layout-grid f-grid-three-column">
           ${metricCard({
-            title: 'Network Status',
+            title: snapshot.chain.backend === 'cdci' ? 'CDCI Network' : 'Network Status',
             value: statusLabels[snapshot.status] ?? snapshot.status,
             caption: `Height ${formatNumber(snapshot.height ?? 0)} on ${snapshot.network}`,
             liveKey: 'network-status',
-            rows: [
-              { label: 'Chain ID', value: snapshot.chainId },
-              { label: 'Algorithm', value: snapshot.algorithm },
-              { label: 'Tip hash', value: snapshot.tipHash ? shortHash(snapshot.tipHash) : '-' },
-              { label: 'Last block', value: formatRelativeTime(Date.now() - (snapshot.tipAgeMs ?? 0)) },
-              { label: 'Seal interval', value: `${Math.round(snapshot.sealer.intervalMs / 1000)}s` },
-              { label: 'Difficulty', value: `${snapshot.sealer.difficultyNibbles} leading zero nibbles` },
-            ],
+            rows: chainRows(snapshot),
           })}
           ${metricCard({
             title: '24H Status',
@@ -120,11 +162,15 @@ export function homePage({ snapshot, records, blocks }) {
             liveKey: 'records24h',
             rows: [
               { label: 'Records', value: formatNumber(snapshot.last24h.records) },
-              { label: 'Blocks sealed', value: formatNumber(snapshot.last24h.blocks) },
+              snapshot.chain.backend === 'cdci'
+                ? { label: 'Anchored on CDCI', value: formatNumber(snapshot.perRecord.anchored) }
+                : { label: 'Blocks sealed', value: formatNumber(snapshot.last24h.blocks ?? 0) },
               { label: 'Ciphertext', value: formatBytes(snapshot.last24h.bytes) },
               { label: 'Fees', value: formatDecimal(snapshot.last24h.fees, 4) },
               { label: 'Confirmed', value: formatNumber(snapshot.perRecord.confirmed) },
-              { label: 'Rejected', value: formatNumber(snapshot.perRecord.rejected) },
+              snapshot.chain.backend === 'cdci'
+                ? { label: 'ChainLocked', value: formatNumber(snapshot.perRecord.chainlocked) }
+                : { label: 'Rejected', value: formatNumber(snapshot.perRecord.rejected) },
             ],
           })}
           ${metricCard({
@@ -150,7 +196,9 @@ export function homePage({ snapshot, records, blocks }) {
           ${notice(
             lockIcon,
             'Message content is never indexed',
-            'Every entry below is a message record referenced as {HASH}/{ID-number}. CrypterChat encrypts message content end-to-end on the client, so ChatScan only ever receives a ciphertext digest, its size and routing metadata.',
+            snapshot.chain.backend === 'cdci'
+              ? `Every entry below is a message record referenced as {HASH}/{ID-number} and anchored on the CDCI X11 chain by an OP_RETURN commitment (${snapshot.anchoring.marker} + 32 bytes). CrypterChat encrypts message content end-to-end on the client, so neither ChatScan nor the chain ever holds anything but a digest.`
+              : 'Every entry below is a message record referenced as {HASH}/{ID-number}. CrypterChat encrypts message content end-to-end on the client, so ChatScan only ever receives a ciphertext digest, its size and routing metadata.',
           )}
         </div>
         ${recordTable(records)}
@@ -203,6 +251,12 @@ export function recordPage({ snapshot, record }) {
           'This message is end-to-end encrypted between CrypterChat clients. ChatScan stores the ciphertext digest below, never the ciphertext itself and never the plaintext, so there is nothing here that can be decrypted by the explorer or its operators.',
         )}
       </div>
+      ${snapshot.chain.backend === 'cdci'
+        ? html`<div class="f-margin-bottom-48">
+            <h2 class="f-h5-heading f-margin-bottom-16">CDCI anchor</h2>
+            ${anchorRows(snapshot, record)}
+          </div>`
+        : ''}
       ${detailTable([
         { key: 'Reference', value: html`<span class="f-mono">${record.ref}</span>` },
         { key: 'Record hash (X11)', value: html`<span class="f-mono">${record.hash}</span>` },
@@ -246,6 +300,53 @@ export function recordPage({ snapshot, record }) {
 }
 
 /**
+ * The CDCI anchor for one record: the commitment it publishes and where that
+ * transaction sits on the chain.
+ * @param {any} snapshot
+ * @param {any} record
+ */
+function anchorRows(snapshot, record) {
+  const anchor = record.anchor;
+  if (!anchor) {
+    return notice(
+      lockIcon,
+      'Not anchored yet',
+      `This record has no CDCI anchor transaction. Publish an OP_RETURN carrying commitment ${record.commitment} and submit its transaction id as "anchorTxid".`,
+    );
+  }
+
+  const finalityLabels = {
+    mempool: 'In the CDCI mempool, not yet in a block',
+    confirmed: 'Confirmed in a block',
+    final: `Final (at least ${snapshot.anchoring.confirmationsForFinality} confirmations)`,
+    chainlocked: 'Final (ChainLocked by the CDCI masternode quorum)',
+    unknown: 'Not verified against the node yet',
+  };
+
+  return detailTable([
+    {
+      key: 'Anchor transaction',
+      value: html`<a class="f-mono f-mono-link" href="/search?q=${anchor.txid}">${anchor.txid}</a>`,
+    },
+    { key: 'Commitment', value: html`<span class="f-mono">${record.commitment}</span>` },
+    { key: 'OP_RETURN marker', value: snapshot.anchoring.marker },
+    { key: 'Output index', value: anchor.outputIndex === null ? '-' : formatNumber(anchor.outputIndex) },
+    { key: 'Confirmations', value: formatNumber(anchor.confirmations) },
+    { key: 'ChainLock', value: anchor.chainlock ? 'Yes' : 'No' },
+    { key: 'Finality', value: finalityLabels[anchor.finality] ?? anchor.finality },
+    {
+      key: 'CDCI block',
+      value:
+        anchor.blockHeight === null
+          ? 'Pending'
+          : html`<a class="f-mono-link" href="/block/${anchor.blockHeight}">#${anchor.blockHeight}</a>
+              <span class="f-mono f-text-color-gray-500"> ${shortHash(anchor.blockHash ?? '')}</span>`,
+    },
+    { key: 'Last checked', value: anchor.verifiedAt ? formatRelativeTime(anchor.verifiedAt) : 'never' },
+  ]);
+}
+
+/**
  * @param {object} args
  * @param {ReturnType<import('../../core/network.js').networkSnapshot>} args.snapshot
  * @param {ReturnType<import('../api.js').publicBlock>} args.block
@@ -265,8 +366,12 @@ export function blockPage({ snapshot, block, records }) {
           <div class="f-margin-bottom-32">
             ${notice(
               blockIcon,
-              `${formatNumber(block.txCount)} message records`,
-              `Sealed ${formatRelativeTime(block.timestamp)} under ${block.algorithm} at difficulty ${block.difficulty}.`,
+              block.source === 'cdci'
+                ? `${formatNumber(records.length)} anchored message records`
+                : `${formatNumber(block.txCount)} message records`,
+              block.source === 'cdci'
+                ? `CDCI block found ${formatRelativeTime(block.timestamp)} with ${formatNumber(block.txCount)} transactions, of which ${formatNumber(records.length)} carry ChatScan anchors.`
+                : `Sealed ${formatRelativeTime(block.timestamp)} under ${block.algorithm} at difficulty ${block.difficulty}.`,
             )}
           </div>
           <div class="f-margin-bottom-32">${searchForm()}</div>
@@ -285,31 +390,60 @@ export function blockPage({ snapshot, block, records }) {
           </div>
         </div>`,
       })}
-      <div class="f-margin-bottom-48">
-        ${detailTable([
-          { key: 'Height', value: formatNumber(block.height) },
-          { key: 'Block hash', value: html`<span class="f-mono">${block.hash}</span>` },
-          {
-            key: 'Previous hash',
-            value:
-              block.height === 0
-                ? html`<span class="f-mono">${block.previousHash}</span>`
-                : html`<a class="f-mono f-mono-link" href="/block/${block.height - 1}">${block.previousHash}</a>`,
-          },
-          { key: 'Merkle root', value: html`<span class="f-mono">${block.merkleRoot}</span>` },
-          { key: 'Timestamp', value: `${formatTimestamp(block.timestamp)} (${formatRelativeTime(block.timestamp)})` },
-          { key: 'Records', value: formatNumber(block.txCount) },
-          { key: 'Ciphertext size', value: formatBytes(block.sizeBytes) },
-          { key: 'Total fees', value: formatDecimal(block.totalFees, 8) },
-          { key: 'Algorithm', value: block.algorithm },
-          { key: 'Difficulty', value: `${block.difficulty} leading zero nibbles` },
-          { key: 'Nonce', value: formatNumber(block.nonce) },
-          { key: 'Sealed by', value: block.sealedBy },
-        ])}
-      </div>
-      ${recordTable(records, `Records in block #${block.height}`)}
+      <div class="f-margin-bottom-48">${detailTable(blockRows(block))}</div>
+      ${recordTable(
+        records,
+        block.source === 'cdci'
+          ? `Message records anchored in block #${block.height}`
+          : `Records in block #${block.height}`,
+      )}
     </div>
   </div>`;
+}
+
+/**
+ * Detail rows for a block, covering both the CDCI and local shapes.
+ * @param {any} block
+ */
+function blockRows(block) {
+  const rows = [
+    { key: 'Height', value: formatNumber(block.height) },
+    { key: 'Block hash', value: html`<span class="f-mono">${block.hash}</span>` },
+    {
+      key: 'Previous hash',
+      value:
+        block.height === 0
+          ? html`<span class="f-mono">${block.previousHash}</span>`
+          : html`<a class="f-mono f-mono-link" href="/block/${block.height - 1}">${block.previousHash}</a>`,
+    },
+    { key: 'Merkle root', value: html`<span class="f-mono">${block.merkleRoot}</span>` },
+    { key: 'Timestamp', value: `${formatTimestamp(block.timestamp)} (${formatRelativeTime(block.timestamp)})` },
+    { key: 'Algorithm', value: block.algorithm === 'x11' ? 'X11 (CDCI proof of work)' : block.algorithm },
+  ];
+
+  if (block.source === 'cdci') {
+    rows.push(
+      { key: 'Transactions', value: formatNumber(block.txCount) },
+      { key: 'Block size', value: formatBytes(block.sizeBytes) },
+      { key: 'Difficulty', value: block.difficulty === null ? '-' : formatDecimal(block.difficulty, 6) },
+      { key: 'Chainwork', value: block.chainwork ? html`<span class="f-mono">${block.chainwork}</span>` : '-' },
+      { key: 'Bits', value: block.bits ?? '-' },
+      { key: 'Nonce', value: formatNumber(block.nonce) },
+      { key: 'Confirmations', value: block.confirmations === null ? '-' : formatNumber(block.confirmations) },
+      { key: 'ChainLock', value: block.chainlock ? 'Yes' : 'No' },
+    );
+    return rows;
+  }
+
+  rows.push(
+    { key: 'Records', value: formatNumber(block.txCount) },
+    { key: 'Ciphertext size', value: formatBytes(block.sizeBytes) },
+    { key: 'Total fees', value: formatDecimal(block.totalFees ?? 0, 8) },
+    { key: 'Difficulty', value: `${block.difficulty} leading zero nibbles` },
+    { key: 'Nonce', value: formatNumber(block.nonce) },
+    { key: 'Sealed by', value: block.sealedBy ?? '-' },
+  );
+  return rows;
 }
 
 /**

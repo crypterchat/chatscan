@@ -42,8 +42,23 @@ export class ChatScanStore extends EventEmitter {
     for (const event of this.log.read()) {
       if (event.t === 'record') this.#indexRecord(event.record);
       else if (event.t === 'block') this.#indexBlock(event.block);
+      else if (event.t === 'record-update') this.#applyUpdate(event.record);
     }
     return this;
+  }
+
+  /**
+   * Replaces an indexed record with a newer snapshot of itself, which is how an
+   * anchor gaining confirmations is replayed.
+   * @param {object} snapshot
+   */
+  #applyUpdate(snapshot) {
+    const existing = this.recordsByRef.get(snapshot.ref);
+    if (!existing) {
+      this.#indexRecord(snapshot);
+      return;
+    }
+    Object.assign(existing, snapshot);
   }
 
   /** @param {object} record */
@@ -80,6 +95,18 @@ export class ChatScanStore extends EventEmitter {
   }
 
   /**
+   * Claims the next ID-number. Reserving before the record is built lets the
+   * node compute the record's reference - and therefore its anchor commitment -
+   * before it decides whether to admit it.
+   * @returns {number}
+   */
+  reserveRecordId() {
+    const id = this.nextRecordId;
+    this.nextRecordId = id + 1;
+    return id;
+  }
+
+  /**
    * Appends a record and emits it to live subscribers.
    * @param {object} record
    */
@@ -88,6 +115,46 @@ export class ChatScanStore extends EventEmitter {
     this.log.append({ t: 'record', record });
     this.emit('record', record);
     return record;
+  }
+
+  /**
+   * Persists a record that was mutated in place - an anchor gaining
+   * confirmations, or a record being rejected after a chain check.
+   * @param {object} record
+   */
+  updateRecord(record) {
+    const key = ciphertextKey(record.ciphertextHash, record.nonce);
+    if (record.status === RECORD_STATUS.rejected) this.recordsByCiphertext.delete(key);
+    else this.recordsByCiphertext.set(key, record);
+
+    this.log.append({ t: 'record-update', record });
+    this.emit('record', record);
+    return record;
+  }
+
+  /**
+   * Records whose anchor is not yet final, oldest first. The anchor watcher
+   * re-checks these against the chain.
+   * @param {number} [limit]
+   */
+  unsettledAnchors(limit = 100) {
+    const pending = [];
+    for (const record of this.records) {
+      if (record.status === RECORD_STATUS.rejected) continue;
+      if (!record.anchor) continue;
+      if (record.anchor.finality === 'chainlocked' || record.anchor.finality === 'final') continue;
+      pending.push(record);
+      if (pending.length >= limit) break;
+    }
+    return pending;
+  }
+
+  /**
+   * Records anchored in one CDCI block.
+   * @param {number} height
+   */
+  recordsAnchoredInBlock(height) {
+    return this.records.filter((record) => record.anchor?.blockHeight === height);
   }
 
   /**
@@ -187,6 +254,8 @@ export class ChatScanStore extends EventEmitter {
     let confirmed = 0;
     let pending = 0;
     let rejected = 0;
+    let anchored = 0;
+    let chainlocked = 0;
     let pendingBytes = 0;
     let totalBytes = 0;
     let last24hCount = 0;
@@ -202,6 +271,11 @@ export class ChatScanStore extends EventEmitter {
         pendingBytes += record.size;
       } else if (record.status === RECORD_STATUS.rejected) rejected += 1;
 
+      if (record.anchor && record.status !== RECORD_STATUS.rejected) {
+        anchored += 1;
+        if (record.anchor.chainlock) chainlocked += 1;
+      }
+
       if (now - record.receivedAt <= DAY_MS) {
         last24hCount += 1;
         last24hBytes += record.size;
@@ -216,6 +290,8 @@ export class ChatScanStore extends EventEmitter {
       confirmed,
       pending,
       rejected,
+      anchored,
+      chainlocked,
       pendingBytes,
       totalBytes,
       blocks: this.blocks.length,

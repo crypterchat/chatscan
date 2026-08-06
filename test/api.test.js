@@ -18,9 +18,10 @@ test('GET /api/v1/status describes the network without leaking content', async (
 
   const status = await (await app.request('/api/v1/status')).json();
 
-  assert.equal(status.network, 'x11-devnet');
-  assert.equal(status.chainId, 'x11:dev');
-  assert.equal(status.algorithm, 'x11-dev-r11');
+  assert.equal(status.backend, 'local');
+  assert.equal(status.network, 'x11-local');
+  assert.equal(status.chainId, 'x11:local');
+  assert.equal(status.algorithm, 'x11-chatscan-r11');
   assert.equal(status.algorithmRounds.length, 11);
   assert.equal(status.height, 0);
   assert.equal(status.privacy.contentIndexed, false);

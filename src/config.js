@@ -1,6 +1,8 @@
 import path from 'node:path';
 import process from 'node:process';
 
+import { defaultRpcUrl } from './chain/cdci-rpc.js';
+
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 
 function int(value, fallback) {
@@ -29,7 +31,7 @@ export function loadConfig(env = process.env) {
     ? path.resolve(env.CHATSCAN_DATA_DIR)
     : path.join(REPO_ROOT, 'data');
 
-  return {
+  const config = {
     repoRoot: REPO_ROOT,
     publicDir: path.join(REPO_ROOT, 'public'),
     dataDir,
@@ -38,10 +40,29 @@ export function loadConfig(env = process.env) {
     host: env.CHATSCAN_HOST ?? '0.0.0.0',
     port: int(env.CHATSCAN_PORT ?? env.PORT, 3000),
 
-    // Network identity. The X11 blockchain is still under development, so the
-    // explorer talks to a local X11-compatible chain by default.
-    networkName: env.CHATSCAN_NETWORK ?? 'x11-devnet',
-    chainId: env.CHATSCAN_CHAIN_ID ?? 'x11:dev',
+    // Which chain the explorer indexes against:
+    //   cdci  - the CDCI X11 blockchain (github.com/Centraldb/CDCI) over RPC
+    //   local - a self-contained development chain, for working without a node
+    backend: (env.CHATSCAN_CHAIN_BACKEND ?? 'local').toLowerCase(),
+
+    cdci: {
+      network: (env.CDCI_NETWORK ?? 'main').toLowerCase(),
+      rpcUrl: env.CDCI_RPC_URL ?? '',
+      rpcUser: env.CDCI_RPC_USER ?? '',
+      rpcPassword: env.CDCI_RPC_PASSWORD ?? '',
+      rpcCookieFile: env.CDCI_RPC_COOKIE_FILE ?? '',
+      rpcTimeoutMs: int(env.CDCI_RPC_TIMEOUT_MS, 5000),
+      // client - the CrypterChat client publishes its own anchor and submits the txid
+      // wallet - ChatScan asks the node's wallet to publish anchors (spends coins)
+      anchorMode: (env.CDCI_ANCHOR_MODE ?? 'client').toLowerCase(),
+      requireAnchor: bool(env.CDCI_REQUIRE_ANCHOR, true),
+      confirmationsForFinality: int(env.CDCI_CONFIRMATIONS_FOR_FINALITY, 6),
+      anchorPollMs: int(env.CDCI_ANCHOR_POLL_MS, 30_000),
+    },
+
+    // Network identity shown in the UI. In cdci mode these follow the node.
+    networkName: env.CHATSCAN_NETWORK ?? '',
+    chainId: env.CHATSCAN_CHAIN_ID ?? '',
 
     // Consensus / sealing.
     blockIntervalMs: int(env.CHATSCAN_BLOCK_INTERVAL_MS, 15_000),
@@ -61,6 +82,40 @@ export function loadConfig(env = process.env) {
     persist: bool(env.CHATSCAN_PERSIST, true),
     logLevel: env.CHATSCAN_LOG_LEVEL ?? 'info',
   };
+
+  if (!['local', 'cdci'].includes(config.backend)) {
+    throw new Error(`CHATSCAN_CHAIN_BACKEND must be "local" or "cdci", received "${config.backend}".`);
+  }
+  if (config.backend === 'cdci' && !CDCI_NETWORKS.includes(config.cdci.network)) {
+    throw new Error(`CDCI_NETWORK must be one of ${CDCI_NETWORKS.join(', ')}, received "${config.cdci.network}".`);
+  }
+  if (config.backend === 'cdci' && !['client', 'wallet'].includes(config.cdci.anchorMode)) {
+    throw new Error(`CDCI_ANCHOR_MODE must be "client" or "wallet", received "${config.cdci.anchorMode}".`);
+  }
+
+  if (!config.cdci.rpcUrl) config.cdci.rpcUrl = defaultRpcUrl(config.cdci.network);
+  if (config.backend === 'cdci' && !config.cdci.rpcUser && !config.cdci.rpcCookieFile) {
+    config.cdci.rpcCookieFile = defaultCookieFile(config.cdci.network);
+  }
+
+  // In cdci mode the node is the source of truth for chain identity.
+  if (!config.networkName) config.networkName = config.backend === 'cdci' ? `cdci-${config.cdci.network}` : 'x11-local';
+  if (!config.chainId) config.chainId = config.backend === 'cdci' ? `cdci:${config.cdci.network}` : 'x11:local';
+
+  return config;
+}
+
+const CDCI_NETWORKS = ['main', 'test', 'devnet', 'regtest'];
+
+/**
+ * Where `centraldatabased` writes its RPC cookie: the data directory for
+ * mainnet, a network subdirectory otherwise (see CDCI's CBaseChainParams).
+ * @param {string} network
+ */
+function defaultCookieFile(network) {
+  const dataDir = path.join(process.env.HOME ?? '', '.centraldatabasecore');
+  const subDirectory = { main: '', test: 'testnet3', devnet: 'devnet', regtest: 'regtest' }[network] ?? '';
+  return path.join(dataDir, subDirectory, '.cookie');
 }
 
 /** @typedef {ReturnType<typeof loadConfig>} Config */

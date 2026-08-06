@@ -1,6 +1,7 @@
 import { networkSnapshot } from '../core/network.js';
 import { publicRecord } from '../core/records.js';
-import { lookupBlock, lookupRecord, pagination, publicBlock, search } from './api.js';
+import { notFound } from '../util/errors.js';
+import { lookupRecord, pagination, publicBlock, search } from './api.js';
 import { sendHtml } from './respond.js';
 import { renderPage } from './views/layout.js';
 import {
@@ -20,32 +21,31 @@ const BLOCKS_PAGE_SIZE = 20;
 /**
  * Registers the server-rendered explorer pages.
  * @param {ReturnType<import('./router.js').createRouter>} router
- * @param {{ store: import('../store/store.js').ChatScanStore, config: import('../config.js').Config }} ctx
+ * @param {{ store: import('../store/store.js').ChatScanStore, chain: import('../chain/service.js').ChainService, config: import('../config.js').Config }} ctx
  */
 export function registerPageRoutes(router, ctx) {
-  const { store, config } = ctx;
-  const snapshot = () => networkSnapshot({ store, config });
+  const { store, chain, config } = ctx;
+  const snapshot = () => networkSnapshot({ store, config, chain });
 
-  router.get('/', (req, res) => {
-    const current = snapshot();
+  router.get('/', async (req, res) => {
+    const [current, blocks] = await Promise.all([snapshot(), chain.listBlocks({ limit: HOME_BLOCK_LIMIT, tolerant: true })]);
     const records = store.listRecords({ limit: HOME_RECORD_LIMIT }).items.map(publicRecord);
-    const blocks = store.listBlocks({ limit: HOME_BLOCK_LIMIT }).items.map(publicBlock);
     sendHtml(
       res,
       200,
       renderPage({
         title: 'ChatScan | Blockchain (Chat) Explorer',
         description:
-          'ChatScan indexes end-to-end encrypted CrypterChat message records on the X11 blockchain. Every message is addressed as {HASH}/{ID-number} and its content is never viewable.',
+          'ChatScan indexes end-to-end encrypted CrypterChat message records on the CDCI X11 blockchain. Every message is addressed as {HASH}/{ID-number} and its content is never viewable.',
         snapshot: current,
-        body: homePage({ snapshot: current, records, blocks }),
+        body: homePage({ snapshot: current, records, blocks: blocks.items.map(publicBlock) }),
       }),
     );
   });
 
-  const renderRecord = (req, res, { params }) => {
+  const renderRecord = async (req, res, { params }) => {
     const record = publicRecord(lookupRecord(store, `${params.hash}/${params.id}`));
-    const current = snapshot();
+    const current = await snapshot();
     sendHtml(
       res,
       200,
@@ -61,40 +61,40 @@ export function registerPageRoutes(router, ctx) {
   router.get('/tx/:hash/:id', renderRecord);
   router.get('/record/:hash/:id', renderRecord);
 
-  router.get('/block/:id', (req, res, { params }) => {
-    const block = lookupBlock(store, params.id);
-    const records = block.recordRefs
-      .map((ref) => store.recordsByRef.get(ref))
-      .filter(Boolean)
-      .map(publicRecord);
-    const current = snapshot();
+  router.get('/block/:id', async (req, res, { params }) => {
+    const block = await chain.getBlock(params.id, { tolerant: true });
+    if (!block) throw notFound(`No block indexed at ${params.id}.`);
+    const records = chain.recordsInBlock(block).map(publicRecord);
+    const current = await snapshot();
     sendHtml(
       res,
       200,
       renderPage({
         title: `Block #${block.height} | ChatScan`,
-        description: `X11 block #${block.height} sealed ${block.txCount} encrypted message records.`,
+        description: `X11 block #${block.height} carries ${records.length} encrypted message records.`,
         snapshot: current,
         body: blockPage({ snapshot: current, block: publicBlock(block), records }),
       }),
     );
   });
 
-  router.get('/blocks', (req, res, { query }) => {
+  router.get('/blocks', async (req, res, { query }) => {
     const { offset } = pagination(query, BLOCKS_PAGE_SIZE);
-    const { items, total } = store.listBlocks({ limit: BLOCKS_PAGE_SIZE, offset });
-    const current = snapshot();
+    const [current, page] = await Promise.all([
+      snapshot(),
+      chain.listBlocks({ limit: BLOCKS_PAGE_SIZE, offset, tolerant: true }),
+    ]);
     sendHtml(
       res,
       200,
       renderPage({
         title: 'X11 blocks | ChatScan',
-        description: 'Blocks sealed by the ChatScan node on the X11 blockchain.',
+        description: 'Blocks on the X11 chain ChatScan indexes.',
         snapshot: current,
         body: blocksPage({
           snapshot: current,
-          blocks: items.map(publicBlock),
-          total,
+          blocks: page.items.map(publicBlock),
+          total: page.total,
           offset,
           limit: BLOCKS_PAGE_SIZE,
         }),
@@ -102,9 +102,9 @@ export function registerPageRoutes(router, ctx) {
     );
   });
 
-  router.get('/search', (req, res, { query }) => {
-    const result = search(store, String(query.get('q') ?? '').trim());
-    const current = snapshot();
+  router.get('/search', async (req, res, { query }) => {
+    const result = await search({ store, chain }, String(query.get('q') ?? '').trim(), { tolerant: true });
+    const current = await snapshot();
     sendHtml(
       res,
       200,
@@ -117,8 +117,8 @@ export function registerPageRoutes(router, ctx) {
     );
   });
 
-  router.get('/privacy', (req, res) => {
-    const current = snapshot();
+  router.get('/privacy', async (req, res) => {
+    const current = await snapshot();
     sendHtml(
       res,
       200,
@@ -135,12 +135,13 @@ export function registerPageRoutes(router, ctx) {
 /**
  * Renders an HTML error page inside the explorer shell.
  * @param {import('node:http').ServerResponse} res
- * @param {{ store: import('../store/store.js').ChatScanStore, config: import('../config.js').Config }} ctx
+ * @param {{ store: import('../store/store.js').ChatScanStore, chain: import('../chain/service.js').ChainService, config: import('../config.js').Config }} ctx
  * @param {number} status
  * @param {string} message
+ * @returns {Promise<void>}
  */
-export function sendErrorPage(res, ctx, status, message) {
-  const current = networkSnapshot({ store: ctx.store, config: ctx.config });
+export async function sendErrorPage(res, ctx, status, message) {
+  const current = await networkSnapshot({ store: ctx.store, config: ctx.config, chain: ctx.chain });
   sendHtml(
     res,
     status,

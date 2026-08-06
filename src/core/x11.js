@@ -3,20 +3,27 @@ import { createHash, getHashes } from 'node:crypto';
 /**
  * X11 chains eleven distinct hash functions, feeding each digest into the next.
  *
- * The production X11 blockchain is still under development and its reference
- * primitives (blake, bmw, groestl, jh, keccak, skein, luffa, cubehash, shavite,
- * simd, echo) are not available in Node's OpenSSL build. This module keeps the
- * eleven-round structure and slot names, and binds each slot to a stand-in
- * digest that Node can compute today. Swapping in the real primitives means
- * editing `X11_ROUNDS` only - callers never depend on the underlying digest.
+ * The slot order below is the one CDCI uses - see `HashX11` in
+ * https://github.com/Centraldb/CDCI/blob/main/src/hash.h - so a record hash
+ * produced here follows the same construction as the chain it is anchored to.
+ *
+ * CDCI computes the rounds with the reference sphlib primitives (blake512,
+ * bmw512, groestl512, skein512, jh512, keccak512, luffa512, cubehash512,
+ * shavite512, simd512, echo512), which Node's OpenSSL build does not ship. Each
+ * slot is therefore bound to a stand-in digest, so this is *not* a consensus
+ * hash: ChatScan never computes X11 proof of work. In `cdci` mode every block
+ * hash comes from the CDCI node, which does the real thing in C, and anchor
+ * transaction ids are SHA-256d exactly as CDCI computes them
+ * (`src/chain/commitment.js`). This chain is only used to derive ChatScan's own
+ * record hashes and the hashes of the local development chain.
  */
 export const X11_ROUNDS = Object.freeze([
   { slot: 'blake', digest: 'blake2b512' },
   { slot: 'bmw', digest: 'sha3-512' },
   { slot: 'groestl', digest: 'sha512' },
+  { slot: 'skein', digest: 'blake2s256' },
   { slot: 'jh', digest: 'sm3' },
   { slot: 'keccak', digest: 'sha3-256' },
-  { slot: 'skein', digest: 'blake2s256' },
   { slot: 'luffa', digest: 'sha384' },
   { slot: 'cubehash', digest: 'sha3-384' },
   { slot: 'shavite', digest: 'ripemd160' },
@@ -25,7 +32,7 @@ export const X11_ROUNDS = Object.freeze([
 ]);
 
 /** Identifier recorded on every block so stored data stays interpretable. */
-export const X11_ALGORITHM_ID = 'x11-dev-r11';
+export const X11_ALGORITHM_ID = 'x11-chatscan-r11';
 
 /** Digest length of {@link x11} output, in bytes. */
 export const X11_DIGEST_BYTES = 32;

@@ -1,7 +1,14 @@
 import { timingSafeEqual } from 'node:crypto';
 
+import {
+  ANCHOR_MARKER,
+  anchorCommitment,
+  anchorPayloadHex,
+  anchorPreimage,
+  anchorScriptHex,
+} from '../chain/commitment.js';
 import { networkSnapshot } from '../core/network.js';
-import { RECORD_STATUS, parseRef, publicRecord } from '../core/records.js';
+import { RECORD_STATUS, normalizeSubmission, parseRef, publicRecord } from '../core/records.js';
 import { X11_ALGORITHM_ID, X11_ROUNDS } from '../core/x11.js';
 import { badRequest, notFound, tooManyRequests, unauthorized } from '../util/errors.js';
 import { readJsonBody, sendJson, writeHead } from './respond.js';
@@ -9,24 +16,31 @@ import { readJsonBody, sendJson, writeHead } from './respond.js';
 const MAX_PAGE_SIZE = 100;
 
 /**
- * Public projection of a block.
+ * Public projection of a block, in the shape both backends normalise to.
  * @param {object} block
  */
 export function publicBlock(block) {
   return {
+    source: block.source,
     height: block.height,
     hash: block.hash,
     previousHash: block.previousHash,
+    nextHash: block.nextHash ?? null,
     merkleRoot: block.merkleRoot,
     timestamp: new Date(block.timestamp).toISOString(),
     algorithm: block.algorithm,
     difficulty: block.difficulty,
+    chainwork: block.chainwork ?? null,
     nonce: block.nonce,
+    bits: block.bits ?? null,
+    version: block.version ?? null,
     txCount: block.txCount,
     sizeBytes: block.sizeBytes,
-    totalFees: block.totalFees,
-    sealedBy: block.sealedBy,
-    recordRefs: block.recordRefs,
+    confirmations: block.confirmations ?? null,
+    chainlock: block.chainlock ?? false,
+    totalFees: block.totalFees ?? null,
+    sealedBy: block.sealedBy ?? null,
+    recordRefs: block.recordRefs ?? null,
   };
 }
 
@@ -36,22 +50,31 @@ export function publicBlock(block) {
  * @param {{ store: import('../store/store.js').ChatScanStore, node: import('../core/chain.js').ChatScanNode, config: import('../config.js').Config, limiter: import('./rate-limit.js').RateLimiter }} ctx
  */
 export function registerApiRoutes(router, ctx) {
-  const { store, node, config, limiter } = ctx;
+  const { store, chain, config, limiter } = ctx;
 
   router.get('/healthz', (req, res) => {
     sendJson(res, 200, { status: 'ok', uptimeSeconds: Math.round(process.uptime()) });
   });
 
-  router.get('/api/v1/status', (req, res) => {
-    sendJson(res, 200, networkSnapshot({ store, config }));
+  router.get('/api/v1/status', async (req, res) => {
+    sendJson(res, 200, await networkSnapshot({ store, config, chain }));
   });
 
   router.get('/api/v1/algorithm', (req, res) => {
     sendJson(res, 200, {
-      algorithm: X11_ALGORITHM_ID,
+      algorithm: chain.mode === 'cdci' ? 'x11' : X11_ALGORITHM_ID,
+      backend: chain.mode,
       rounds: X11_ROUNDS.map((round, index) => ({ order: index + 1, slot: round.slot, digest: round.digest })),
-      note: 'The X11 blockchain is under development. Slots keep the reference X11 order; digests are stand-ins until the reference primitives land.',
+      reference: 'https://github.com/Centraldb/CDCI/blob/main/src/hash.h',
+      note:
+        chain.mode === 'cdci'
+          ? 'Block hashes and proof of work come from the CDCI node, which runs the reference X11 primitives in C. The slot order above mirrors HashX11; the digests listed are what ChatScan uses for its own record hashes.'
+          : 'Local development chain. Slot order mirrors CDCI HashX11; each slot is bound to a stand-in digest, so these hashes are not CDCI consensus hashes.',
     });
+  });
+
+  router.get('/api/v1/chain', async (req, res) => {
+    sendJson(res, 200, await chain.chainInfo());
   });
 
   router.post('/api/v1/records', async (req, res, { clientKey }) => {
@@ -63,7 +86,7 @@ export function registerApiRoutes(router, ctx) {
     }
 
     const body = await readJsonBody(req, config.maxRequestBytes);
-    const { record, accepted } = node.submit(body);
+    const { record, accepted } = await chain.submit(body);
 
     sendJson(res, accepted ? 201 : 202, {
       ref: record.ref,
@@ -71,8 +94,34 @@ export function registerApiRoutes(router, ctx) {
       id: record.id,
       status: record.status,
       rejectionReason: record.rejectionReason,
+      commitment: record.commitment,
+      anchor: publicRecord(record).anchor,
       explorerUrl: `/tx/${record.ref}`,
       record: publicRecord(record),
+    });
+  });
+
+  router.get('/api/v1/records/:hash/:id/anchor', (req, res, { params }) => {
+    const record = lookupRecord(store, `${params.hash}/${params.id}`);
+    sendJson(res, 200, {
+      ref: record.ref,
+      ...anchorInstructions(record.commitment),
+      anchor: publicRecord(record).anchor,
+    });
+  });
+
+  /**
+   * Preflight for a client that has encrypted a message but not yet submitted
+   * it: returns the commitment to publish on CDCI so the anchor transaction can
+   * be broadcast before the record is submitted.
+   */
+  router.post('/api/v1/anchor-payload', async (req, res) => {
+    const body = await readJsonBody(req, config.maxRequestBytes);
+    const submission = normalizeSubmission(body, { maxCiphertextBytes: config.maxCiphertextBytes });
+    sendJson(res, 200, {
+      chainId: config.chainId,
+      preimage: anchorPreimage({ chainId: config.chainId, ...submission }),
+      ...anchorInstructions(anchorCommitment({ chainId: config.chainId, ...submission })),
     });
   });
 
@@ -96,40 +145,42 @@ export function registerApiRoutes(router, ctx) {
     sendJson(res, 200, { record: publicRecord(record) });
   });
 
-  router.get('/api/v1/blocks', (req, res, { query }) => {
+  router.get('/api/v1/blocks', async (req, res, { query }) => {
     const { limit, offset } = pagination(query, 10);
-    const { items, total } = store.listBlocks({ limit, offset });
+    const { items, total } = await chain.listBlocks({ limit, offset });
     sendJson(res, 200, { total, limit, offset, blocks: items.map(publicBlock) });
   });
 
-  router.get('/api/v1/blocks/:id', (req, res, { params }) => {
-    const block = lookupBlock(store, params.id);
+  router.get('/api/v1/blocks/:id', async (req, res, { params }) => {
+    const block = await chain.getBlock(params.id);
+    if (!block) throw notFound(`No block indexed at ${params.id}.`);
     sendJson(res, 200, {
       block: publicBlock(block),
-      records: block.recordRefs
-        .map((ref) => store.recordsByRef.get(ref))
-        .filter(Boolean)
-        .map(publicRecord),
+      records: chain.recordsInBlock(block).map(publicRecord),
     });
   });
 
-  router.get('/api/v1/search', (req, res, { query }) => {
+  router.get('/api/v1/search', async (req, res, { query }) => {
     const term = String(query.get('q') ?? '').trim();
-    sendJson(res, 200, search(store, term));
+    sendJson(res, 200, await search({ store, chain }, term));
   });
 
-  router.get('/api/v1/stream', (req, res) => {
+  router.get('/api/v1/stream', async (req, res) => {
     writeHead(res, 200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-store',
       connection: 'keep-alive',
     });
-    res.write(`event: status\ndata: ${JSON.stringify(networkSnapshot({ store, config }))}\n\n`);
+    write(res, 'status', await networkSnapshot({ store, config, chain }));
 
     const onRecord = (record) => write(res, 'record', publicRecord(record));
     const onBlock = (block) => write(res, 'block', publicBlock(block));
     const heartbeat = setInterval(() => {
-      write(res, 'status', networkSnapshot({ store, config }));
+      networkSnapshot({ store, config, chain })
+        .then((snapshot) => write(res, 'status', snapshot))
+        .catch(() => {
+          /* the next heartbeat tries again */
+        });
     }, Math.max(2000, Math.min(config.blockIntervalMs, 10_000)));
     heartbeat.unref?.();
 
@@ -147,6 +198,20 @@ export function registerApiRoutes(router, ctx) {
 }
 
 /**
+ * What a client needs in order to publish one anchor on the CDCI chain.
+ * @param {string} commitment
+ */
+function anchorInstructions(commitment) {
+  return {
+    commitment,
+    marker: ANCHOR_MARKER,
+    opReturnPayload: anchorPayloadHex(commitment),
+    opReturnScript: anchorScriptHex(commitment),
+    note: 'Publish this payload in an OP_RETURN output on the CDCI chain, then submit the record with the transaction id as "anchorTxid".',
+  };
+}
+
+/**
  * @param {import('node:http').ServerResponse} res
  * @param {string} event
  * @param {unknown} payload
@@ -157,12 +222,12 @@ function write(res, event, payload) {
 }
 
 /**
- * Free-text lookup over the explorer index: a `{HASH}/{ID}` reference, a record
- * hash, a block hash, a block height, or an ID-number.
- * @param {import('../store/store.js').ChatScanStore} store
+ * Free-text lookup: a `{HASH}/{ID}` reference, a record hash, a block hash, an
+ * anchor transaction id, a block height, or an ID-number.
+ * @param {{ store: import('../store/store.js').ChatScanStore, chain: import('../chain/service.js').ChainService }} ctx
  * @param {string} term
  */
-export function search(store, term) {
+export async function search({ store, chain }, term, { tolerant = false } = {}) {
   if (!term) return { query: term, kind: 'empty', results: [] };
   const normalized = term.toLowerCase();
 
@@ -177,7 +242,7 @@ export function search(store, term) {
   }
 
   if (/^[0-9a-f]{64}$/.test(normalized)) {
-    const block = store.getBlockByHash(normalized);
+    const block = await chain.getBlock(normalized, { tolerant });
     if (block) {
       return {
         query: term,
@@ -185,11 +250,23 @@ export function search(store, term) {
         results: [{ type: 'block', url: `/block/${block.height}`, block: publicBlock(block) }],
       };
     }
-    const records = store.getRecordsByHash(normalized);
+
+    const byHash = store.getRecordsByHash(normalized);
+    if (byHash.length > 0) {
+      return {
+        query: term,
+        kind: 'record-hash',
+        results: byHash.map((record) => ({ type: 'record', url: `/tx/${record.ref}`, record: publicRecord(record) })),
+      };
+    }
+
+    // A 64-hex term that is neither a block nor a record hash may be the CDCI
+    // anchor transaction of an indexed record.
+    const byAnchor = store.records.filter((record) => record.anchor?.txid === normalized);
     return {
       query: term,
-      kind: 'record-hash',
-      results: records.map((record) => ({ type: 'record', url: `/tx/${record.ref}`, record: publicRecord(record) })),
+      kind: byAnchor.length > 0 ? 'anchor-txid' : 'record-hash',
+      results: byAnchor.map((record) => ({ type: 'record', url: `/tx/${record.ref}`, record: publicRecord(record) })),
     };
   }
 
@@ -199,7 +276,7 @@ export function search(store, term) {
     const results = [];
     const record = store.getRecordById(value);
     if (record) results.push({ type: 'record', url: `/tx/${record.ref}`, record: publicRecord(record) });
-    const block = store.getBlockByHeight(value);
+    const block = await chain.getBlock(value, { tolerant });
     if (block) results.push({ type: 'block', url: `/block/${block.height}`, block: publicBlock(block) });
     return { query: term, kind: 'number', results };
   }
@@ -222,14 +299,11 @@ export function lookupRecord(store, ref) {
 }
 
 /**
- * @param {import('../store/store.js').ChatScanStore} store
+ * @param {import('../chain/service.js').ChainService} chain
  * @param {string} idOrHash
  */
-export function lookupBlock(store, idOrHash) {
-  const value = String(idOrHash ?? '').toLowerCase();
-  const block = /^\d{1,15}$/.test(value)
-    ? store.getBlockByHeight(Number.parseInt(value, 10))
-    : store.getBlockByHash(value);
+export async function lookupBlock(chain, idOrHash) {
+  const block = await chain.getBlock(String(idOrHash ?? '').toLowerCase());
   if (!block) throw notFound(`No block indexed at ${idOrHash}.`);
   return block;
 }

@@ -2,6 +2,7 @@ import { merkleRoot } from './merkle.js';
 import {
   PROTOCOLS,
   RECORD_STATUS,
+  applyAnchor,
   createRecord,
   normalizeSubmission,
 } from './records.js';
@@ -12,6 +13,9 @@ export const GENESIS_PREVIOUS_HASH = '0'.repeat(64);
 export const REJECTION_REASONS = Object.freeze({
   replay: 'replay-detected',
   protocolSize: 'protocol-size-exceeded',
+  anchorMissing: 'anchor-missing',
+  anchorNotFound: 'anchor-not-found',
+  anchorMismatch: 'anchor-mismatch',
 });
 
 /**
@@ -23,10 +27,16 @@ export class ChatScanNode {
    * @param {object} options
    * @param {import('../store/store.js').ChatScanStore} options.store
    * @param {import('../config.js').Config} options.config
+   * @param {((ref: string, txid: string) => Promise<object>) | null} [options.verifyAnchor]
+   *   Set in cdci mode: resolves how a record's anchor transaction looks on the
+   *   CDCI chain. Left null for the local development chain.
+   * @param {boolean} [options.requireAnchor]
    */
-  constructor({ store, config }) {
+  constructor({ store, config, verifyAnchor = null, requireAnchor = false }) {
     this.store = store;
     this.config = config;
+    this.verifyAnchor = verifyAnchor;
+    this.requireAnchor = requireAnchor;
     /** @type {NodeJS.Timeout | null} */
     this.timer = null;
   }
@@ -74,18 +84,24 @@ export class ChatScanNode {
    * that are well formed but violate chain policy are indexed with status
    * `rejected` so they stay auditable in the explorer.
    *
+   * In cdci mode the record's anchor transaction is checked against the CDCI
+   * chain before the record is indexed, so a record is only ever stored with
+   * its verdict already attached.
+   *
    * @param {unknown} body
    * @param {{ now?: number }} [options]
-   * @returns {{ record: object, accepted: boolean }}
+   * @returns {Promise<{ record: object, accepted: boolean }>}
    */
-  submit(body, { now = Date.now() } = {}) {
+  async submit(body, { now = Date.now() } = {}) {
     const submission = normalizeSubmission(body, {
       maxCiphertextBytes: this.config.maxCiphertextBytes,
     });
 
-    const rejectionReason = this.#policyRejection(submission);
+    let rejectionReason = this.#policyRejection(submission);
     const record = createRecord({
-      id: this.store.peekNextRecordId(),
+      // Reserved up front: the ID-number is part of the reference, and the
+      // reference is what the CDCI anchor commits to.
+      id: this.store.reserveRecordId(),
       submission,
       chainId: this.config.chainId,
       receivedAt: now,
@@ -93,13 +109,51 @@ export class ChatScanNode {
       rejectionReason,
     });
 
+    if (!rejectionReason && this.verifyAnchor) {
+      rejectionReason = await this.#settleAnchor(record, now);
+      if (rejectionReason) {
+        record.status = RECORD_STATUS.rejected;
+        record.rejectionReason = rejectionReason;
+      }
+    }
+
     this.store.addRecord(record);
 
-    if (!rejectionReason && this.store.mempool(this.config.maxRecordsPerBlock).length >= this.config.maxRecordsPerBlock) {
-      this.sealBlock({ now });
+    if (!rejectionReason && !this.verifyAnchor) {
+      if (this.store.mempool(this.config.maxRecordsPerBlock).length >= this.config.maxRecordsPerBlock) {
+        this.sealBlock({ now });
+      }
     }
 
     return { record: this.store.getRecord(record.hash, record.id) ?? record, accepted: !rejectionReason };
+  }
+
+  /**
+   * Checks a record's CDCI anchor and attaches what the chain says.
+   * @param {object} record
+   * @param {number} now
+   * @returns {Promise<string | null>} a rejection reason, or null
+   */
+  async #settleAnchor(record, now) {
+    if (!record.anchor?.txid) {
+      return this.requireAnchor ? REJECTION_REASONS.anchorMissing : null;
+    }
+
+    let anchor;
+    try {
+      anchor = await this.verifyAnchor(record.commitment, record.anchor.txid);
+    } catch (error) {
+      // The node being unreachable is not the client's fault: keep the record
+      // pending and let the anchor watcher settle it later.
+      process.emitWarning(`ChatScan could not verify anchor ${record.anchor.txid}: ${error.message}`);
+      return null;
+    }
+
+    if (!anchor.found) return REJECTION_REASONS.anchorNotFound;
+    if (!anchor.matched) return REJECTION_REASONS.anchorMismatch;
+
+    applyAnchor(record, anchor, now);
+    return null;
   }
 
   /**

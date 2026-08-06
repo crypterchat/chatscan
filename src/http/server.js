@@ -12,13 +12,13 @@ import { serveStatic } from './static.js';
  * Builds the ChatScan HTTP server.
  * @param {object} args
  * @param {import('../store/store.js').ChatScanStore} args.store
- * @param {import('../core/chain.js').ChatScanNode} args.node
+ * @param {import('../chain/service.js').ChainService} args.chain
  * @param {import('../config.js').Config} args.config
  */
-export function createServer({ store, node, config }) {
+export function createServer({ store, chain, config }) {
   const limiter = new RateLimiter({ limit: config.ingestRatePerMinute });
   const router = createRouter();
-  const ctx = { store, node, config, limiter };
+  const ctx = { store, chain, config, limiter };
 
   registerApiRoutes(router, ctx);
   registerPageRoutes(router, ctx);
@@ -29,7 +29,7 @@ export function createServer({ store, node, config }) {
         res.destroy();
         return;
       }
-      respondWithError(req, res, ctx, error);
+      respondWithError(req, res, ctx, error).catch(() => res.destroy());
     });
   });
 
@@ -79,10 +79,10 @@ async function handle(req, res, router, ctx) {
  * API clients get JSON errors; browsers get the explorer error page.
  * @param {import('node:http').IncomingMessage} req
  * @param {import('node:http').ServerResponse} res
- * @param {{ store: any, config: import('../config.js').Config }} ctx
+ * @param {{ store: any, chain: any, config: import('../config.js').Config }} ctx
  * @param {unknown} error
  */
-function respondWithError(req, res, ctx, error) {
+async function respondWithError(req, res, ctx, error) {
   const url = req.url ?? '/';
   const accepts = String(req.headers.accept ?? '');
   const wantsJson =
@@ -101,7 +101,7 @@ function respondWithError(req, res, ctx, error) {
   }
 
   try {
-    sendErrorPage(res, ctx, httpError?.status ?? 500, httpError?.message ?? 'The explorer hit an unexpected error.');
+    await sendErrorPage(res, ctx, httpError?.status ?? 500, httpError?.message ?? 'The explorer hit an unexpected error.');
   } catch {
     const body = 'ChatScan is unavailable.\n';
     writeHead(res, 500, { 'content-type': 'text/plain; charset=utf-8', 'content-length': Buffer.byteLength(body) });
