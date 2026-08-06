@@ -18,6 +18,39 @@ The chain is **CDCI** - CentralDataBase Core, [github.com/Centraldb/CDCI](https:
 a 35-byte `OP_RETURN` commitment, and the explorer reports its confirmations and ChainLock status. See
 [docs/CDCI.md](docs/CDCI.md).
 
+![The ChatScan dashboard, connected to a CDCI node](docs/media/dashboard.png)
+
+## Demo
+
+A 90-second tour of the explorer: the dashboard and its live CDCI figures, a message record with its on-chain anchor, a
+block, and the privacy page. Recorded against a CDCI regtest node.
+
+![Animated tour of the ChatScan Block Explorer](docs/media/chatscan-explorer-preview.webp)
+
+<video src="docs/media/chatscan-explorer-tour.mp4" controls width="100%"></video>
+
+The preview above runs at 3x speed - [watch the full recording](docs/media/chatscan-explorer-tour.mp4) for the real
+pace.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/media/records.png" alt="Message records with Confirmed, Pending and Rejected states"></td>
+<td width="50%"><img src="docs/media/record-anchor.png" alt="A message record showing its CDCI anchor and the notice that content is not viewable"></td>
+</tr>
+<tr>
+<td>Message records, addressed as <code>{HASH}/{ID-number}</code>, with their protocol and settlement state.</td>
+<td>One record: the CDCI anchor transaction, its commitment, ChainLock status - and no way to read the message.</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/media/block.png" alt="An X11 block on the CDCI chain"></td>
+<td width="50%"><img src="docs/media/privacy.png" alt="The page listing exactly what ChatScan stores and refuses"></td>
+</tr>
+<tr>
+<td>An X11 block read from the CDCI node, with the message records anchored in it.</td>
+<td>Exactly what is indexed for every message, and everything that is refused.</td>
+</tr>
+</table>
+
 ## Quick start
 
 Requires **Node.js 20.11 or newer**. There are no dependencies to install.
