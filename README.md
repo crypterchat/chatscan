@@ -206,9 +206,6 @@ test/          node:test suite, including a stub CDCI node
 docs/          API reference, CDCI setup, architecture notes, screenshots and the demo video
 ```
 
-The UI is built from the ChatScan Webflow design (`chatscan.webflow.io`): the same `f-*` component classes and tokens,
-rendered server side so every record has a shareable URL and the explorer works without JavaScript.
-
 ## Licence
 
 MIT - see [LICENSE](LICENSE).
