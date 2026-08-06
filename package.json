@@ -1,0 +1,33 @@
+{
+  "name": "chatscan",
+  "version": "1.0.0",
+  "description": "ChatScan Block Explorer — encrypted message explorer for CrypterChat on the X11 Blockchain",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js",
+    "test": "node --test test/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/crypterchat/chatscan.git"
+  },
+  "keywords": [
+    "chatscan",
+    "crypterchat",
+    "x11",
+    "blockchain",
+    "explorer",
+    "e2ee"
+  ],
+  "author": "CrypterChat",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
