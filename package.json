@@ -1,0 +1,18 @@
+{
+  "name": "chatscan",
+  "version": "1.0.0",
+  "description": "ChatScan Block Explorer — encrypted message blockchain explorer for X11",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
