@@ -29,10 +29,12 @@ export function networkSnapshot({ store, config, now = Date.now() }) {
   const tipAgeMs = stats.tipTimestamp === null ? null : Math.max(0, now - stats.tipTimestamp);
   const staleAfterMs = config.blockIntervalMs * 3;
 
+  // An idle chain is healthy: the sealer only produces a block when records are
+  // waiting, so a stale tip is only a problem while the mempool is backed up.
   let status = 'online';
   if (!config.sealerEnabled) status = 'paused';
   else if (tipAgeMs === null) status = 'syncing';
-  else if (tipAgeMs > staleAfterMs) status = 'degraded';
+  else if (tipAgeMs > staleAfterMs && stats.pending > 0) status = 'degraded';
 
   const last24hBlocks = store.blocks.filter((block) => now - block.timestamp <= 24 * 60 * 60 * 1000).length;
 

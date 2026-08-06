@@ -47,7 +47,7 @@ only. The Content-Security-Policy forbids inline `<script>` and inline `style` a
 ## Verifying a change
 
 ```bash
-npm test                                    # 64 tests, no network needed
+npm test                                    # 70 tests, no network needed
 npm start                                   # explorer on http://localhost:3000
 npm run seed                                # demo traffic, including one rejected record
 npm run send -- "hello"                     # one message; plaintext stays local

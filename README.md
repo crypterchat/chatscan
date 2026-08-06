@@ -36,7 +36,7 @@ npm run send -- "hello world"    # one message; the plaintext never leaves your 
 
 Then open <http://localhost:3000>.
 
-Run the test suite (64 tests, no network access needed):
+Run the test suite (70 tests, no network access needed):
 
 ```bash
 npm test
