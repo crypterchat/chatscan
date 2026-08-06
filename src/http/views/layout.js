@@ -1,4 +1,4 @@
-import { html, raw, render } from '../../util/html.js';
+import { html, render } from '../../util/html.js';
 import { githubIcon } from './icons.js';
 
 export const REPO_URL = 'https://github.com/crypterchat/chatscan';
@@ -130,5 +130,3 @@ function footer() {
     </div>
   </div>`;
 }
-
-export { raw };

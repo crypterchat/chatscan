@@ -51,7 +51,11 @@ export class ChatScanStore extends EventEmitter {
     this.records.push(record);
     this.recordsByRef.set(record.ref, record);
     this.recordsById.set(record.id, record);
-    this.recordsByCiphertext.set(ciphertextKey(record.ciphertextHash, record.nonce), record);
+    // Rejected records are deliberately left out of the replay index: a client
+    // that fixes a policy violation must be able to resubmit the same ciphertext.
+    if (record.status !== RECORD_STATUS.rejected) {
+      this.recordsByCiphertext.set(ciphertextKey(record.ciphertextHash, record.nonce), record);
+    }
     if (record.id >= this.nextRecordId) this.nextRecordId = record.id + 1;
   }
 

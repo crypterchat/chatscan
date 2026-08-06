@@ -1,10 +1,9 @@
 import { timingSafeEqual } from 'node:crypto';
 
-import { ChatScanNode } from '../core/chain.js';
 import { networkSnapshot } from '../core/network.js';
 import { RECORD_STATUS, parseRef, publicRecord } from '../core/records.js';
 import { X11_ALGORITHM_ID, X11_ROUNDS } from '../core/x11.js';
-import { HttpError, badRequest, notFound, tooManyRequests, unauthorized } from '../util/errors.js';
+import { badRequest, notFound, tooManyRequests, unauthorized } from '../util/errors.js';
 import { readJsonBody, sendJson, writeHead } from './respond.js';
 
 const MAX_PAGE_SIZE = 100;
@@ -34,7 +33,7 @@ export function publicBlock(block) {
 /**
  * Registers `/api/v1/*` routes.
  * @param {ReturnType<import('./router.js').createRouter>} router
- * @param {{ store: import('../store/store.js').ChatScanStore, node: ChatScanNode, config: import('../config.js').Config, limiter: import('./rate-limit.js').RateLimiter }} ctx
+ * @param {{ store: import('../store/store.js').ChatScanStore, node: import('../core/chain.js').ChatScanNode, config: import('../config.js').Config, limiter: import('./rate-limit.js').RateLimiter }} ctx
  */
 export function registerApiRoutes(router, ctx) {
   const { store, node, config, limiter } = ctx;
@@ -307,5 +306,3 @@ function safeEqual(a, b) {
   if (left.length !== right.length) return false;
   return timingSafeEqual(left, right);
 }
-
-export { HttpError };

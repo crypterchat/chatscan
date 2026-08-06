@@ -107,6 +107,20 @@ test('a record above its protocol ceiling is recorded as rejected', () => {
   assert.equal(result.record.rejectionReason, REJECTION_REASONS.protocolSize);
 });
 
+test('a client can resubmit a ciphertext that was rejected on policy', () => {
+  const { node } = testNode();
+  const submission = sampleSubmission({ protocol: 'ETH', size: 256 * 1024, nonce: 'f00d' });
+
+  const rejected = node.submit(submission);
+  assert.equal(rejected.accepted, false);
+
+  // The same ciphertext under a protocol that allows the size must not be
+  // mistaken for a replay of the rejected record.
+  const retried = node.submit({ ...submission, protocol: 'C7G' });
+  assert.equal(retried.accepted, true);
+  assert.equal(retried.record.status, 'pending');
+});
+
 test('a full mempool seals immediately', () => {
   const { node, store } = testNode({ CHATSCAN_MAX_RECORDS_PER_BLOCK: '3' });
 
