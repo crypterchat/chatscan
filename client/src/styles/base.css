@@ -1,0 +1,80 @@
+/*
+ * Minimal base reset, adapted from the ChatScan Webflow export so the
+ * hand-written React components below match the original design's spacing,
+ * typography and grid conventions without pulling in the full Webflow
+ * runtime (webflow.js, jQuery, IE polyfills) that the static export shipped.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background-color: #fff;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  color: #333;
+}
+
+img,
+svg {
+  max-width: 100%;
+  vertical-align: middle;
+  display: inline-block;
+}
+
+a {
+  background-color: transparent;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: bold;
+  margin: 0 0 10px;
+}
+
+p {
+  margin: 0 0 10px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.w-inline-block {
+  max-width: 100%;
+  display: inline-block;
+}
+
+.w-embed::before,
+.w-embed::after {
+  content: " ";
+  display: table;
+}
+
+.w-embed::after {
+  clear: both;
+}
+
+.w-layout-grid {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  row-gap: 16px;
+  column-gap: 16px;
+}
