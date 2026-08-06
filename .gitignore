@@ -54,3 +54,24 @@ build-iPhoneSimulator/
 
 # Used by RuboCop. Remote config files pulled in from inherit_from directive.
 # .rubocop-https?--*
+
+# --- ChatScan Block Explorer ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+*.tsbuildinfo
+
+# Local ledger index (server) - never contains message content, just hash/id/status,
+# but is environment-specific and should not be committed.
+server/data/*.json
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor/OS
+.DS_Store
+*.log
+npm-debug.log*
