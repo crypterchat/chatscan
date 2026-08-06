@@ -79,7 +79,7 @@ CHATSCAN_CHAIN_BACKEND=cdci CDCI_NETWORK=main npm start
 
 [docs/CDCI.md](docs/CDCI.md) covers the node flags, ports, credentials and the anchoring flow.
 
-Run the test suite (115 tests, no network access needed - the CDCI paths run against a stub node):
+Run the test suite (146 tests, no network access needed - the CDCI paths run against a stub node):
 
 ```bash
 npm test
@@ -98,10 +98,32 @@ npm test
 
 `/record/{HASH}/{ID-number}` is an alias of `/tx/...`.
 
-## Recording a message
+## Connecting a chat app
 
-A CrypterChat client encrypts the message, hashes the ciphertext, anchors the commitment on CDCI, and submits
-**metadata only**:
+The [ChatScan SDK](sdk/) is the supported way in. It encrypts locally, anchors on CDCI and records the message in one
+call, and it has no dependencies - Node, browser or React Native:
+
+```js
+import { CdciWallet, ChatSession } from '@crypterchat/chatscan-sdk';
+
+const session = await ChatSession.connect({
+  baseUrl: 'https://chatscan.org',
+  wallet: new CdciWallet({ network: 'main', user: 'rpcuser', password: process.env.CDCI_RPC_PASSWORD }),
+  appVersion: 'my-chat-1.0',
+});
+
+const sent = await session.send('shipping the x11 sealer today', { conversation: 'devgroup' });
+console.log(sent.ref, sent.explorerUrl, sent.anchorTxid);
+```
+
+`sent.key` and `sent.envelope` stay in your process; the explorer never receives either. Run the worked example against
+a local explorer with `node sdk/examples/chat-app.mjs devgroup`, and see [sdk/README.md](sdk/README.md) for reading
+history, watching the live stream, bringing your own encryption, and handling failures.
+
+## Recording a message directly
+
+Under the SDK it is plain HTTP. A client encrypts the message, hashes the ciphertext, anchors the commitment on CDCI,
+and submits **metadata only**:
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/records \
@@ -177,10 +199,11 @@ src/core/      X11 hashing, merkle roots, record model, local chain and sealer
 src/store/     In-memory index plus the append-only chain log
 src/http/      Router, REST API, SSE stream, static assets, server-rendered pages
 src/http/views ChatScan UI (Webflow design system, rendered server side)
+sdk/           Client SDK for chat apps, plus a worked example
 public/        Stylesheet, progressive-enhancement script, images
 scripts/       Demo client and seeder
 test/          node:test suite, including a stub CDCI node
-docs/          API reference, CDCI setup, architecture notes
+docs/          API reference, CDCI setup, architecture notes, screenshots and the demo video
 ```
 
 The UI is built from the ChatScan Webflow design (`chatscan.webflow.io`): the same `f-*` component classes and tokens,

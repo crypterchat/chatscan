@@ -12,7 +12,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/*.test.js sdk/test/*.test.js",
     "seed": "node scripts/seed.js",
     "send": "node scripts/send-message.js"
   },

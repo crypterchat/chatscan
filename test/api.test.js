@@ -216,6 +216,14 @@ test('search resolves references, hashes and heights', async (t) => {
   const empty = await (await app.request('/api/v1/search?q=')).json();
   assert.equal(empty.kind, 'empty');
 
+  const channel = 'c'.repeat(64);
+  await app.submit(sampleSubmission({ channelHash: channel }));
+  await app.submit(sampleSubmission({ channelHash: channel }));
+  const byChannel = await (await app.request(`/api/v1/search?q=${channel}`)).json();
+  assert.equal(byChannel.kind, 'channel');
+  assert.equal(byChannel.results.length, 2);
+  assert.ok(byChannel.results.every((result) => result.record.channelHash === channel));
+
   const unsupported = await (await app.request('/api/v1/search?q=hello%20world')).json();
   assert.equal(unsupported.kind, 'unsupported');
   assert.deepEqual(unsupported.results, []);

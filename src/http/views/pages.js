@@ -495,10 +495,15 @@ export function searchPage({ snapshot, result }) {
   const hints = html`<div class="f-empty-state">
     <div class="f-paragraph-regular f-text-weight-medium">Nothing matched that query</div>
     <div class="f-paragraph-small f-text-color-gray-500">
-      ChatScan looks up a record reference (<span class="f-mono">{HASH}/{ID-number}</span>), a 64-character record or
-      block hash, a block height, or a record ID-number.
+      ChatScan looks up a record reference (<span class="f-mono">{HASH}/{ID-number}</span>), a 64-character record hash,
+      block hash, anchor transaction id or channel hash, a block height, or a record ID-number.
     </div>
   </div>`;
+
+  const titles = {
+    channel: 'Records in this channel',
+    'anchor-txid': 'Records anchored by this transaction',
+  };
 
   return html`<div class="f-section-large">
     <div class="f-container-regular">
@@ -515,7 +520,7 @@ export function searchPage({ snapshot, result }) {
         ? hints
         : html`${recordTable(
               result.results.filter((item) => item.type === 'record').map((item) => item.record),
-              'Matching records',
+              titles[result.kind] ?? 'Matching records',
             )}
             ${blockTable(result.results.filter((item) => item.type === 'block').map((item) => item.block))}`}
     </div>

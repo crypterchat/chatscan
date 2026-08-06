@@ -43,6 +43,7 @@ commitment, and its content is never viewable. Read [ARCHITECTURE.md](../../../d
 | CDCI RPC call | `src/chain/cdci.js`, stub response in `test/support/cdci-stub.js`, `test/cdci.test.js` |
 | Anchoring or finality | `src/chain/commitment.js`, `src/chain/anchor-watcher.js`, `docs/CDCI.md`, `test/cdci-explorer.test.js` |
 | Backend-visible behaviour | `src/chain/service.js` - keep both backends normalising to one shape |
+| Anything a chat app consumes | mirror it in `sdk/src/`, `sdk/src/index.d.ts`, `sdk/README.md`, `sdk/test/` |
 | Index or persistence | `src/store/`, `test/store.test.js` |
 | New setting | `src/config.js`, `.env.example`, the README table (CDCI settings go in `docs/CDCI.md`) |
 
@@ -70,7 +71,7 @@ only. The Content-Security-Policy forbids inline `<script>` and inline `style` a
 ## Verifying a change
 
 ```bash
-npm test                                    # 115 tests, no node or network needed
+npm test                                    # 146 tests, covering the explorer and the SDK
 npm start                                   # local development chain on http://localhost:3000
 npm run seed                                # demo traffic, including one rejected record
 CHATSCAN_CHAIN_BACKEND=cdci npm start       # index a real centraldatabased node
@@ -80,3 +81,7 @@ curl -s localhost:3000/api/v1/status        # backend, chain state, anchoring se
 The CDCI paths are covered against `test/support/cdci-stub.js`, which mimics the daemon's RPC responses - extend the stub
 rather than mocking `fetch`. Add a test with every behaviour change, and when touching privacy-sensitive code assert the
 negative too: that a content field is refused, or that a response has no content key.
+
+The SDK is a separate package, so it does not import from `src/` at runtime - it reimplements the commitment on
+WebCrypto so it also runs in a browser. `sdk/test/sdk.test.js` asserts the two derivations agree; if you change the
+commitment scheme, both sides and that conformance test must move together.

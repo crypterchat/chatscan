@@ -263,10 +263,25 @@ export async function search({ store, chain }, term, { tolerant = false } = {}) 
     // A 64-hex term that is neither a block nor a record hash may be the CDCI
     // anchor transaction of an indexed record.
     const byAnchor = store.records.filter((record) => record.anchor?.txid === normalized);
+    if (byAnchor.length > 0) {
+      return {
+        query: term,
+        kind: 'anchor-txid',
+        results: byAnchor.map((record) => ({ type: 'record', url: `/tx/${record.ref}`, record: publicRecord(record) })),
+      };
+    }
+
+    // Otherwise it may be a channel: the record page links a record's channel
+    // here, and a chat app can list one conversation the same way.
+    const byChannel = store.listRecords({ limit: 50, channelHash: normalized });
     return {
       query: term,
-      kind: byAnchor.length > 0 ? 'anchor-txid' : 'record-hash',
-      results: byAnchor.map((record) => ({ type: 'record', url: `/tx/${record.ref}`, record: publicRecord(record) })),
+      kind: byChannel.total > 0 ? 'channel' : 'record-hash',
+      results: byChannel.items.map((record) => ({
+        type: 'record',
+        url: `/tx/${record.ref}`,
+        record: publicRecord(record),
+      })),
     };
   }
 
