@@ -1,3 +1,7 @@
+# ChatScan runtime data
+/data/
+node_modules/
+
 *.gem
 *.rbc
 /.config

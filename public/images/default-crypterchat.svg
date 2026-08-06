@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="248" height="48" viewBox="0 0 248 48" role="img" aria-label="CrypterChat">
+  <rect x="2" y="8" width="32" height="26" rx="8" fill="#25347b"/>
+  <path d="M12 34 L12 42 L22 34 Z" fill="#25347b"/>
+  <circle cx="11" cy="21" r="2.5" fill="#fff"/>
+  <circle cx="18" cy="21" r="2.5" fill="#fff"/>
+  <circle cx="25" cy="21" r="2.5" fill="#fff"/>
+  <text x="42" y="30" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#160042">CrypterChat</text>
+</svg>

@@ -1,0 +1,19 @@
+{
+  "name": "chatscan-block-explorer",
+  "version": "0.1.0",
+  "description": "ChatScan Block Explorer - a block explorer for end-to-end encrypted CrypterChat messages. Records {HASH}/{ID} entries only; message contents are never stored or viewable. Designed for the X11 Blockchain (under development).",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/crypterchat/chatscan.git"
+  }
+}
