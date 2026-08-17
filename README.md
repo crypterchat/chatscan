@@ -52,6 +52,14 @@ Project skill for Cursor agents:
 
 `.cursor/skills/chatscan-block-explorer/SKILL.md`
 
+## Kickstarter campaign kit
+
+Upload-ready crowdfunding materials (pitch, rewards, funding estimate, demo video):
+
+`kickstarter/FILEMAP.md`
+
+Recommended primary goal: **$15,000** (see `kickstarter/02-funding/funding-estimate.md`).
+
 ## License
 
 MIT © CrypterChat
