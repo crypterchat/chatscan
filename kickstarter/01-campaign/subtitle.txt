@@ -1,0 +1,1 @@
+A blockchain chat explorer for CrypterChat. Track encrypted messages as HASH/ID — never the content.

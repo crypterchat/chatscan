@@ -1,0 +1,3 @@
+Primary: Technology → Apps
+Alternate: Technology → Open Hardware / Software tools (if Apps is blocked for your region)
+Duration: 30–35 days
